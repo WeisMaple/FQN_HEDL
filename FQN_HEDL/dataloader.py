@@ -136,3 +136,23 @@ def ood_dataloader(
     print(f'[dataloader] OOD dataset={ood_name}({ood_dataset_code})  '
           f'samples={len(ds)}  ood_classes={ood_num_classes}')
     return dl
+
+def data_fqn_config(dataset_code: str) -> dict:
+    """
+    从 DATASET_CONFIG 中读取 FQN 专用超参数。
+    DATASET_CONFIG 格式:
+        (name, in_channels, num_classes, batch_size, lr_decay,
+         ks, dim, kprop, depth, input_scale)
+    """
+    if dataset_code not in DATASET_CONFIG:
+        print(f'[dataloader] 未知数据集代码: {dataset_code}')
+        sys.exit(1)
+    name, in_ch, n_cls, bs, lr_d, ks, dim, kprop, depth, input_scale = \
+        get_dataset_config(dataset_code)
+    return {
+        'input_window' : ks,
+        'dim'          : dim,
+        'hidden_window': kprop,
+        'depth'        : depth,
+        'input_scale'  : input_scale,
+    }

@@ -235,18 +235,21 @@ def ODIN(inputs, outputs, model, temper, noiseMagnitude1):
 
     return nnOutputs
 
-def calculate_socre(output, method, data = None, model = None):
+def calculate_socre(output, method, data=None, model=None):
     concat = lambda x: np.concatenate(x, axis=0)
     to_np = lambda x: x.data.cpu().numpy()
+
     if method == 'msp':
         score = []
         smax = to_np(F.softmax(output, dim=1))
         score.append(np.max(smax, axis=1))
         return concat(score).copy()
+
     elif method == 'energy':
         score = []
         score.append(-to_np((output.mean(1) - torch.logsumexp(output, dim=1))))
         return concat(score).copy()
+
     elif method == 'entropy':
         score = []
         smax = F.softmax(output, dim=1)
@@ -254,6 +257,8 @@ def calculate_socre(output, method, data = None, model = None):
         entropy = dist.entropy()
         score.append(-entropy.data.cpu().numpy())
         return concat(score).copy()
-    elif method == 'uncertainty':
-        return concat(-to_np(output)).copy()
 
+    elif method == 'uncertainty':
+        arr = to_np(output)
+        # ← 关键修复：无论输入是 (N,) 还是 (N,1) 都展平为 1D
+        return (-arr).reshape(-1).copy()

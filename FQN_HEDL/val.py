@@ -4,23 +4,38 @@ import numpy as np
 import torch.backends.cudnn as cudnn
 warnings.filterwarnings("ignore")
 
-from dataloader import data_class, data_in_channels, dataloader, ood_dataloader  # ← 新增 ood_dataloader
+from dataloader import data_class, data_in_channels, data_fqn_config, dataloader, ood_dataloader
 from losses import (edl_HENN, edl_HENN_log, edl_HENN_mse,
                     get_henn_fc, relu_evidence)
 from evaluation import calculate_ood, calculate_socre
-from models import Conv1DBackbone
-from data_utils import LOCAL_UCR_PATH                                             # ← 新增
+from models import Conv1DBackbone, FQNBackbone
+from data_utils import LOCAL_UCR_PATH
 from tqdm import tqdm
 
 
 def build_model(args):
-    in_ch = data_in_channels(args.dataset)            # ← 改动点
-    return Conv1DBackbone(
-        in_channels = in_ch,
-        num_classes = args.num_classes,
-        feat_dim    = args.feat_dim,
-        loss        = args.loss,
-    )
+    in_ch = data_in_channels(args.dataset)
+    if args.model == 'FQN':
+        fqn_cfg = data_fqn_config(args.dataset)
+        model = FQNBackbone(
+            in_channels    = in_ch,
+            num_classes    = args.num_classes,
+            device         = str(args.device),
+            dim            = fqn_cfg['dim'],
+            depth          = fqn_cfg['depth'],
+            input_window   = fqn_cfg['input_window'],
+            input_scale    = fqn_cfg['input_scale'],
+            hidden_window  = fqn_cfg['hidden_window'],
+            loss           = args.loss,
+        )
+    else:
+        model = Conv1DBackbone(
+            in_channels = in_ch,
+            num_classes = args.num_classes,
+            feat_dim    = args.feat_dim,
+            loss        = args.loss,
+        )
+    return model
 
 
 @torch.no_grad()
@@ -38,18 +53,22 @@ def validate(args, valid_dl, ood_dl, model):
             features, outputs = model(inputs)
             _, preds = torch.max(outputs, 1)
             total_uncertainty.append(outputs.cpu())
+
         elif args.loss in ('edl_HENN', 'edl_HENN_log', 'edl_HENN_mse'):
             features, outputs = model(inputs)
             belief = get_henn_fc(features, model.get_weight(),
                                  args.w, args.num_classes, args.device)
             _, preds = torch.max(belief, 1)
-            u = args.w / torch.sum(belief, dim=1, keepdim=True)
+            # ← 修复：squeeze 到 (B,)，而非 (B,1)
+            u = (args.w / torch.sum(belief, dim=1, keepdim=True)).squeeze(1)
             total_uncertainty.append(u.cpu())
+
         else:
             features, outputs = model(inputs)
             _, preds = torch.max(outputs, 1)
             alpha = relu_evidence(outputs) + 1
-            u = args.num_classes / torch.sum(alpha, dim=1, keepdim=True)
+            # ← 修复：squeeze 到 (B,)
+            u = (args.num_classes / torch.sum(alpha, dim=1, keepdim=True)).squeeze(1)
             total_uncertainty.append(u.cpu())
 
         label_idx = labels.argmax(dim=1)
@@ -64,21 +83,23 @@ def validate(args, valid_dl, ood_dl, model):
         if args.loss in ('Softmax', 'dropout'):
             features, outputs = model(inputs)
             total_uncertainty.append(outputs.cpu())
+
         elif args.loss in ('edl_HENN', 'edl_HENN_log', 'edl_HENN_mse'):
             features, outputs = model(inputs)
             belief = get_henn_fc(features, model.get_weight(),
                                  args.w, args.num_classes, args.device)
-            u = args.w / torch.sum(belief, dim=1, keepdim=True)
+            u = (args.w / torch.sum(belief, dim=1, keepdim=True)).squeeze(1)
             total_uncertainty.append(u.cpu())
+
         else:
             features, outputs = model(inputs)
             alpha = relu_evidence(outputs) + 1
-            u = args.num_classes / torch.sum(alpha, dim=1, keepdim=True)
+            u = (args.num_classes / torch.sum(alpha, dim=1, keepdim=True)).squeeze(1)
             total_uncertainty.append(u.cpu())
 
         total_label.extend([0] * inputs.size(0))
 
-    total_uncertainty = torch.cat(total_uncertainty, dim=0)
+    total_uncertainty = torch.cat(total_uncertainty, dim=0)   # (N,) or (N, C)
     total_label       = np.array(total_label)
     acc               = running_corrects / size_k
     return acc, total_uncertainty, total_label
@@ -86,17 +107,13 @@ def validate(args, valid_dl, ood_dl, model):
 
 def main(args):
     args.num_classes = data_class(args.dataset)
-
     if torch.cuda.is_available():
         cudnn.benchmark = True
 
-    # ── 数据加载 ─────────────────────────────────────────────────────────────
     valid_dl = dataloader(args.dataset, 'test',
                           batch_size=args.batch_size,
                           num_workers=args.num_workers,
                           local_path=args.local_path)
-
-    # OOD：使用 ID 数据集的全局统计量归一化，序列长度对齐               ← 改动点
     ood_dl = ood_dataloader(
         ood_dataset_code = args.ood_dataset,
         id_dataset_code  = args.dataset,
@@ -105,14 +122,12 @@ def main(args):
         local_path       = args.local_path,
     )
 
-    # ── 模型 ─────────────────────────────────────────────────────────────────
     model = build_model(args).to(args.device)
     ckpt  = torch.load(args.checkpoint, map_location='cpu')
     model.load_state_dict(ckpt['model'])
     model.eval()
-    print(f'模型已加载: {args.checkpoint}')
+    print(f'模型已加载: {args.checkpoint}  backbone={args.model}')
 
-    # ── 验证 ─────────────────────────────────────────────────────────────────
     acc, total_uncertainty, total_label = validate(args, valid_dl, ood_dl, model)
     ood_res = {'acc': acc, 'err': 1.0 - acc}
     print(f'Accuracy: {acc:.4f}')
@@ -142,20 +157,21 @@ def main(args):
 
 if __name__ == '__main__':
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-    parser = argparse.ArgumentParser(description='HEDL 1D Validation')
-    parser.add_argument('--dataset',     type=str, default='D1',
-                        help='ID 数据集代码，如 D1~D20')
-    parser.add_argument('--ood-dataset', type=str, default='D2',
-                        help='OOD 数据集代码')
-    parser.add_argument('--local-path',  type=str, default=LOCAL_UCR_PATH)
-    parser.add_argument('--checkpoint',  type=str, required=True)
-    parser.add_argument('--loss',        type=str, default='edl_HENN')
-    parser.add_argument('--feat-dim',    type=int, default=256)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset',     type=str,   default='D1')
+    parser.add_argument('--ood-dataset', type=str,   default='D2')
+    parser.add_argument('--local-path',  type=str,   default=LOCAL_UCR_PATH)
+    parser.add_argument('--checkpoint',  type=str,   required=True)
+    parser.add_argument('--model',       type=str,   default='FQN',
+                        help='FQN / Conv1D')
+    parser.add_argument('--loss',        type=str,   default='edl_HENN')
+    parser.add_argument('--feat-dim',    type=int,   default=256,
+                        help='仅 Conv1D backbone 使用')
     parser.add_argument('--w',           type=float, default=2.0)
-    parser.add_argument('--batch-size',  type=int, default=64)
-    parser.add_argument('--num-workers', type=int, default=4)
-    parser.add_argument('--output-dir',  type=str, default='results')
-    parser.add_argument('--name',        type=str, default='hedl_1d')
+    parser.add_argument('--batch-size',  type=int,   default=64)
+    parser.add_argument('--num-workers', type=int,   default=4)
+    parser.add_argument('--output-dir',  type=str,   default='results')
+    parser.add_argument('--name',        type=str,   default='hedl_fqn')
     parser.add_argument('--device',
                         default=torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'))
     args = parser.parse_args()

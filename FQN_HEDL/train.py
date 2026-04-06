@@ -13,20 +13,36 @@ from losses import (edl_mse_loss, edl_digamma_loss, edl_log_loss,
 from models import Conv1DBackbone
 from data_utils import LOCAL_UCR_PATH                              # ← 新增
 
+from dataloader import data_class, data_in_channels, data_fqn_config, dataloader
+from models import Conv1DBackbone, FQNBackbone
+
+
 warnings.filterwarnings("ignore")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 def build_model(args):
-    """从 DATASET_CONFIG 读取 in_channels，不再写死。"""
-    in_ch    = data_in_channels(args.dataset)          # ← 改动点
-    feat_dim = args.feat_dim
-    model = Conv1DBackbone(
-        in_channels = in_ch,
-        num_classes = args.num_classes,
-        feat_dim    = feat_dim,
-        loss        = args.loss,
-    )
+    in_ch = data_in_channels(args.dataset)
+    if args.model == 'FQN':
+        fqn_cfg = data_fqn_config(args.dataset)
+        model = FQNBackbone(
+            in_channels   = in_ch,
+            num_classes   = args.num_classes,
+            device        = str(args.device),
+            dim           = fqn_cfg['dim'],
+            depth         = fqn_cfg['depth'],
+            input_window  = fqn_cfg['input_window'],
+            input_scale   = fqn_cfg['input_scale'],
+            hidden_window = fqn_cfg['hidden_window'],
+            loss          = args.loss,
+        )
+    else:   # Conv1D
+        model = Conv1DBackbone(
+            in_channels = in_ch,
+            num_classes = args.num_classes,
+            feat_dim    = args.feat_dim,
+            loss        = args.loss,
+        )
     return model
 
 
@@ -137,6 +153,8 @@ if __name__ == '__main__':
     parser.add_argument('--debug',        action='store_true')
     parser.add_argument('--device',
                         default=torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'))
+    parser.add_argument('--model', type=str, default='FQN',
+                        help='FQN / Conv1D')
     args = parser.parse_args()
     print(args)
 
