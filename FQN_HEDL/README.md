@@ -1,25 +1,15 @@
 # ReadMe
 
-## Hyper-opinion Evidential Deep Learning (HEDL)
+## FQN-HEDL
 
-It's the code for Hyper-opinion Evidential Deep Learning (HEDL).
+This is a model that integrates FQN with HEDL and can only process 1D data now.
 
-Please download every package in requirements.txt first, and download the cifar10, cifar100, flower, cub, SVHN, Texture, and Place365 datasets, then storage them in the directory named as '/mnt/Data/xx', e.g., '/mnt/Data/CIFAR10'.
+To train the model, use
 
+> python train.py --dataset D9 --model FQN --loss edl_HENN --w 2.0
 
+where D9 is choosen from <D1~D20>(the trained model will be automatically saved), and valid as:
 
-To train an HEDL model from begining, please run the code follows:
+> python val.py --dataset D9 --ood-dataset D11 --checkpoint runs_D9/edl_HENN/acc/checkpoints/checkpoint.pth --loss edl_HENN
 
-First train the backbone with softmax for 90 epoches:
-
-> python train.py --epoch 90 --name HEDL --dataset [dataset]
-
-and then train in HEDL for 10 epoches:
-
-> python train.py --epoch 10 --name HEDL --dataset [dataset] --loss edl_HENN --checkpoint_path [path of the backbone]
-
-where [dataset] is choosen from <cifar10,cifar100,flower,cub>, and valid as:
-
-> python val.py --loss edl_HENN --name HEDL --dataset [dataset] --ood [ood_dataset]
-
-where [ood_dataset] is choosen from <SVHN/dtd/place365>, standing for SVHN/Texture/Place365 datasets.
+where D9,D11 is choosen from <D1~D20>.
