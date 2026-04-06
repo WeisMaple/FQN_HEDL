@@ -178,6 +178,12 @@ if __name__ == '__main__':
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay
     )
 
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=args.epochs,
+        eta_min=args.lr * 0.01,
+    )
+
     if args.checkpoint_path:
         ckpt = torch.load(args.checkpoint_path, map_location='cpu')
         model.load_state_dict(ckpt['model'])
@@ -205,12 +211,18 @@ if __name__ == '__main__':
         valid_loss, valid_acc = evaluate(args, writer, model, criterion,
                                          valid_dl, epoch)
 
+        scheduler.step()
+
         print(f'  train_loss={train_loss.item():.4f}  '
               f'valid_loss={valid_loss:.4f}  valid_acc={valid_acc:.4f}  '
               f'best_acc={best_acc:.4f}')
 
-        state = {'model': model.state_dict(),
-                 'optimizer': optimizer.state_dict(), 'epoch': epoch}
+        state = {
+            'model': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'scheduler': scheduler.state_dict(),  # ← 新增
+            'epoch': epoch,
+        }
 
         if valid_acc > best_acc:
             best_acc = valid_acc

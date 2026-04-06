@@ -105,34 +105,26 @@ def ood_dataloader(
     num_workers: int = 4,
     local_path: str = LOCAL_UCR_PATH,
 ) -> DataLoader:
-    """
-    加载 OOD 数据集，使用 ID 数据集的全局均值/标准差进行标准化，
-    并将序列长度对齐到 ID 数据集。
+    id_data    = _get_cached_data(id_dataset_code, local_path=local_path)
+    ood_name, ood_in_channels, ood_num_classes, *_ = get_dataset_config(ood_dataset_code)
 
-    Args:
-        ood_dataset_code : OOD 数据集代码，如 'D2'
-        id_dataset_code  : 用作 ID 的数据集代码（提供归一化统计量和序列长度）
-    """
-    id_data   = _get_cached_data(id_dataset_code, local_path=local_path)
-    ood_name, *_ = get_dataset_config(ood_dataset_code)
-
-    # ID 数据集的序列长度（从训练集推断）
     target_len   = id_data['X_train'].shape[2]
     global_means = id_data['global_means']
     global_stds  = id_data['global_stds']
 
     X_ood, y_ood = prepare_ood_data(
-        ood_name    = ood_name,
+        ood_name     = ood_name,
         global_means = global_means,
         global_stds  = global_stds,
         target_len   = target_len,
         local_path   = local_path,
     )
 
+    # ← 关键修复：使用 OOD 数据集自身的 num_classes，而非 ID 的
     ds = TimeSeriesDataset(
         X           = X_ood,
         y           = y_ood,
-        num_classes = id_data['num_classes'],   # 保持与 ID 一致
+        num_classes = ood_num_classes,
     )
     dl = DataLoader(
         ds,
@@ -142,5 +134,5 @@ def ood_dataloader(
         pin_memory  = True,
     )
     print(f'[dataloader] OOD dataset={ood_name}({ood_dataset_code})  '
-          f'samples={len(ds)}')
+          f'samples={len(ds)}  ood_classes={ood_num_classes}')
     return dl

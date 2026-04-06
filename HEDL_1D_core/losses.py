@@ -93,20 +93,15 @@ def edl_loss(func, y, alpha, epoch_num, num_classes, annealing_step, device=None
     S = torch.sum(alpha, dim=1, keepdim=True)
     A = torch.sum(y * (func(S) - func(alpha)), dim=1, keepdim=True)
 
-    # u = num_classes/S
-    # y1 =torch.max(y,dim=1)[1]
-    # alpha_gt = torch.gather(alpha, 1, y1.unsqueeze(dim=1))
-    # cor_loss = u * torch.log(alpha_gt - 1)
-    
-    # annealing_coef = torch.min(
-    #     torch.tensor(1.0, dtype=torch.float32),
-    #     torch.tensor(epoch_num / annealing_step, dtype=torch.float32),
-    # )
+    # ← 恢复KL正则项，这是EDL能产生正确不确定度的关键
+    annealing_coef = torch.min(
+        torch.tensor(1.0, dtype=torch.float32),
+        torch.tensor(epoch_num / annealing_step, dtype=torch.float32),
+    )
+    kl_alpha = (alpha - 1) * (1 - y) + 1
+    kl_div = annealing_coef * kl_divergence(kl_alpha, num_classes, device=device)
 
-    # kl_alpha = (alpha - 1) * (1 - y) + 1
-    # kl_div = annealing_coef * kl_divergence(kl_alpha, num_classes, device=device)
-    # return A + 0.001 * kl_div - cor_loss
-    return A
+    return A + kl_div
 
 
 def edl_mse_loss(output, target, epoch_num, num_classes, annealing_step, device=None):
