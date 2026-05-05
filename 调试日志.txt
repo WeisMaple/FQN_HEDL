@@ -1,0 +1,30 @@
+诊断结果：根因锁定
+关键发现
+指标	D1 (GOOD)	D5 (BAD)	差异
+特征同类余弦相似度	0.94	0.71	D1 高 32%
+特征异类余弦相似度	0.08	0.18	D5 高 135%
+类间分离比 (intra/inter)	12.26	3.98	3倍差距
+Evidence 均值	4.83	1.47	D1 高 3.3x
+Logits 负值比例	50.0%	57.5%	D5 更多 logits 被 ReLU 清零
+Test Acc (Stage 1)	95.9%	77.5%	D5 分类就没学好
+Expander 零值比例	71.1%	87.7%	D5 特征极度稀疏
+OOD 分离度的决定性差异
+D1	D5
+OOD vacuity > ID vacuity	12/12 (100%)	4/12 (33%)
+平均分离度	+0.26	−0.03
+D1 上 OOD 的 vacuity 全部高于 ID，方向完全正确。D5 上一大半 OOD 的 vacuity 反而低于 ID——模型认为 OOD 比 ID "更像训练分布"。
+
+根本原因
+FQN 在 D5 (ECG200) 上没有提取出足够好的特征。 这不是 HEDL 的问题，是 FQN 本身的问题——Stage 1 分类准确率只有 77.5%，同类特征的余弦相似度只有 0.71。HEDL 的 evidential 机制需要高质量的特征来支撑信念分配，特征质量差 → evidence 弱且非判别性 → vacuity 分离失效。
+
+D5 (T=96, ks=31) 比 D1 (T=24, ks=9) 时间长 4 倍、kernel 大 3.4 倍，FQN 的 Quanv1d 层在这个配置下可能缺乏足够的 receptive field 或表达容量。
+
+下一步方向
+区分 FQN 特征质量 vs HEDL 不确定性质量：用同一 ResNet18 backbone 训练一个 HEDL 模型，看 D5 上 OOD 是否也不工作——如果也不工作，说明是数据集本身的问题而非架构问题
+对 D5 调整 FQN 超参数：增大 dim、减小 kernel size、增加 depth
+按 Stage 1 Acc 分组评估 OOD：把所有 20 个数据集按 FQN Stage 1 的 test acc 分成高/低两组，看 OOD 性能是否与分类性能强相关
+
+
+
+
+量子的噪声能否作为OOD检测的一环呢，对于ID的数据，噪声在经过给定的变换后，应当是有其特征的，而OOD的噪声变换后还是噪声，或者说与原来我们训练的东西还是有差别的
